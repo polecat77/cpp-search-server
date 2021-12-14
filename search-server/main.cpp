@@ -2,13 +2,14 @@ class SearchServer {
 public:
 
     inline static constexpr int INVALID_DOCUMENT_ID = -1;
-
+    inline static constexpr double EPSILON = 1e-6;
+    
     template <typename StringContainer>
     explicit SearchServer(const StringContainer& stop_words) 
         : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
         for (const auto& word : stop_words_) {
             if (!IsValidWord(word)) {
-                throw invalid_argument("недопустимые символы"s);            
+                throw invalid_argument("недопустимые символы в стоп-слове \""s + word+ "\""s);
             }
         }
     }
@@ -18,19 +19,26 @@ public:
     {
         for (const auto& word : stop_words_) {
             if (!IsValidWord(word)) {
-                throw invalid_argument("недопустимые символы"s);            
+                throw invalid_argument("недопустимые символы в стоп-слове \""s + word + "\""s);
             }
         }
     }
     
     //Добавляем документы
     void AddDocument(int document_id, const string& document, DocumentStatus status, const vector<int>& ratings) {
-        if ((document_id < 0) || (documents_.count(document_id) > 0) || !IsValidWord(document)) {
-            throw invalid_argument("некорректный документ"s);
+        if (document_id < 0) {
+            throw invalid_argument("id документа \""s + document + "\" меньше нуля"s);
         }
+        if (documents_.count(document_id) > 0) {
+            throw invalid_argument("документ с данным id уже добавлен \""s + document + "\""s);
+        }        
+        if (!IsValidWord(document)) {
+            throw invalid_argument("недопустимые символы в документе \""s + document + "\""s);
+        }        
+        
         vector<string> words;
         if (!SplitIntoWordsNoStop(document, words)) {
-            throw invalid_argument("некорректный документ"s);
+            throw invalid_argument("попытка разбития документа \""s + document + "\" на слова закончилась неудачно"s);
         }
 
         const double inv_word_count = 1.0 / words.size();
@@ -44,17 +52,17 @@ public:
     template <typename DocumentPredicate>
     vector<Document> FindTopDocuments(const string& raw_query, DocumentPredicate document_predicate) const {
     //Проверка условий
-        if (!IsNotValidQuery(raw_query) || !IsValidWord(raw_query)) {
-            throw invalid_argument("некорректный запрос"s);
+        if (IsNoValidQuery(raw_query)) {
+            throw invalid_argument("некорректный поисковый запрос \""s + raw_query + "\""s);
         }
         Query query;
         //Разбираем запрос и в случае неудачи выдаем исключение
         if (!ParseQuery(raw_query, query)) {
-            throw invalid_argument("некорректный запрос"s);
+            throw invalid_argument("попытка разбития на слова поискового запроса \""s + raw_query + "\" закончилась неудачно "s);
         }
         auto matched_documents = FindAllDocuments(query, document_predicate);
         sort(matched_documents.begin(), matched_documents.end(), [](const Document& lhs, const Document& rhs) {
-            if (abs(lhs.relevance - rhs.relevance) < 1e-6) {
+            if (abs(lhs.relevance - rhs.relevance) < EPSILON) {
                 return lhs.rating > rhs.rating;
             } else {
                 return lhs.relevance > rhs.relevance;
@@ -89,12 +97,13 @@ public:
 
     tuple<vector<string>, DocumentStatus> MatchDocument(const string& raw_query, int document_id) const {
         //Проверка условий
-        if (!IsNotValidQuery(raw_query) || !IsValidWord(raw_query)) {
-            throw invalid_argument("некорректный запрос"s);
+        if (IsNoValidQuery(raw_query)) {
+            throw invalid_argument("некорректный поисковый запрос \""s + raw_query + "\""s);
         }
+        
         Query query;
         if (!ParseQuery(raw_query, query)) {
-            throw invalid_argument("некорректный запрос"s);
+            throw invalid_argument("попытка разбития на слова матчинг запроса закончилась неудачно "s);
         }
         vector<string> matched_words;
         for (const string& word : query.plus_words) {
@@ -149,6 +158,13 @@ private:
             }
         }
         return true;
+    }
+
+    static bool IsNoValidQuery(const string& query) {
+        if (!IsNotValidQuery(query) || !IsValidWord(query)) {
+            return true;
+        }
+        return false;
     }
 
     [[nodiscard]] bool SplitIntoWordsNoStop(const string& text, vector<string>& result) const {
